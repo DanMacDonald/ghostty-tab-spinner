@@ -14,6 +14,12 @@ credentials. MIT licensed.
 | Agent busy | `⠋ MyProject` (animating braille) |
 | Waiting for your input | `[!] Action Required` ↔ `[.] Action Required` |
 
+**Note:** This changes Grok’s default tab-title behavior. Instead of the built-in
+verbose status messages on the tab, you get the project name (with a spinner
+while the agent is working, and **Action Required** when input is needed). That
+is intentional: the install steps disable Grok’s own title updates so they do
+not fight this plugin.
+
 ## Requirements
 
 - [Grok Build](https://grok.x.ai) (hooks support)
