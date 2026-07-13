@@ -44,44 +44,19 @@ hooks are reliable end-to-end.
 Do **not** install a second competing copy under both a broken plugin path and
 global hooks that point at different trees unless you know only one is firing.
 
-### Steps (global hooks)
+### Steps (recommended)
 
 ```bash
 git clone https://github.com/DanMacDonald/ghostty-tab-spinner.git
 cd ghostty-tab-spinner
-./scripts/build.sh
-
-# Stable local path (optional plugin discovery + convenient symlink):
-mkdir -p ~/.grok/plugins
-ln -sfn "$PWD" ~/.grok/plugins/ghostty-tab-spinner
-
-# Global hooks — this is what actually runs the spinner:
-mkdir -p ~/.grok/hooks
-ROOT="$PWD"
-python3 - "$ROOT" <<'PY'
-import json, pathlib, sys
-root = sys.argv[1]
-events = {
-    "SessionStart": "session-start.sh",
-    "UserPromptSubmit": "on-busy.sh",
-    "PreToolUse": "on-activity.sh",
-    "PostToolUse": "on-post-tool.sh",
-    "PostToolUseFailure": "on-post-tool.sh",
-    "Notification": "on-notification.sh",
-    "Stop": "on-idle.sh",
-    "StopFailure": "on-idle.sh",
-    "SessionEnd": "session-end.sh",
-}
-hooks = {}
-for ev, script in events.items():
-    timeout = 8 if ev in ("Stop", "StopFailure", "SessionEnd") else 5
-    hooks[ev] = [{"hooks": [{"type": "command",
-        "command": f'bash "{root}/bin/{script}"', "timeout": timeout}]}]
-path = pathlib.Path.home() / ".grok/hooks/ghostty-tab-spinner.json"
-path.write_text(json.dumps({"description": "ghostty-tab-spinner", "hooks": hooks}, indent=2) + "\n")
-print("wrote", path)
-PY
+./scripts/install.sh
 ```
+
+`install.sh` will:
+
+1. Build `bin/gts-title` if `cargo` is available (else bash fallback)
+2. Symlink the repo into `~/.grok/plugins/ghostty-tab-spinner`
+3. Write **global hooks** to `~/.grok/hooks/ghostty-tab-spinner.json` (absolute paths)
 
 In `~/.grok/config.toml`:
 
@@ -93,17 +68,24 @@ enabled = false   # critical — Grok must not fight OSC titles
 Restart Grok after installing. (Session picker still shows `grok` until you
 start/resume a session — there is no earlier hook than `SessionStart`.)
 
+```bash
+# Options
+./scripts/install.sh --skip-build      # keep existing binary / bash fallback
+./scripts/install.sh --no-plugin-link  # hooks only
+./scripts/uninstall.sh                 # remove hooks + plugin symlink
+```
+
 ### Optional: plugin-only install
 
 ```bash
-grok plugin install /path/to/ghostty-tab-spinner --trust
+grok plugin install https://github.com/DanMacDonald/ghostty-tab-spinner.git --trust
 # and/or enable in config:
 # [plugins]
 # enabled = ["ghostty-tab-spinner"]
 ```
 
-If the tab stays `grok` and never spins, check `/hooks` and fall back to the
-global-hooks steps above — that usually means plugin hooks were discovered but
+If the tab stays `grok` and never spins, check `/hooks` and run
+`./scripts/install.sh` — that usually means plugin hooks were discovered but
 not executed.
 
 ## How it works
@@ -121,6 +103,8 @@ Stop              →  restore project title
 
 ```bash
 ./scripts/build.sh
+# or re-run the full installer:
+./scripts/install.sh
 ```
 
 ## Configuration (environment)
@@ -140,9 +124,11 @@ Logs: `$TMPDIR/ghostty-tab-spinner/<session>/sessions/<id>/hook.log`
 ## Layout
 
 ```text
-bin/           # hook scripts + gts-title
-hooks/         # plugin hooks.json (optional / discovery)
-rust/          # gts-title source
+bin/                 # hook scripts + gts-title
+hooks/               # plugin hooks.json (optional / discovery)
+rust/                # gts-title source
+scripts/install.sh   # recommended installer
+scripts/uninstall.sh
 scripts/build.sh
 plugin.json
 ```
