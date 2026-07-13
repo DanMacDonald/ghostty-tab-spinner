@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse: keep spinner alive; ask_user_question → Action Required.
-# ALWAYS exit 0 — never deny tools.
+#
+# No tool matcher on purpose: spinner must survive every tool in a turn.
+# ALWAYS exit 0 — never deny tools, never inspect tool args beyond name.
 set +e
 # shellcheck source=common.sh
 source "$(cd "$(dirname "$0")" && pwd)/common.sh" 2>/dev/null || exit 0

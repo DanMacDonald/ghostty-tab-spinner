@@ -1,8 +1,19 @@
 {
   "name": "ghostty-tab-spinner",
-  "version": "1.0.0",
-  "description": "Codex-style braille spinner in the terminal tab title while Grok works. Shows [!] Action Required when waiting for user input. Pair with [ui.notifications.title] enabled=false.",
+  "version": "1.0.1",
+  "description": "Codex-style braille spinner on the terminal tab title while Grok works, plus [!] Action Required when waiting for user input. Pure OSC titles; no network access. Pair with [ui.notifications.title] enabled=false.",
   "author": {
-    "name": "Dan MacDonald"
-  }
+    "name": "Dan MacDonald",
+    "url": "https://github.com/DanMacDonald"
+  },
+  "homepage": "https://github.com/DanMacDonald/ghostty-tab-spinner",
+  "repository": "https://github.com/DanMacDonald/ghostty-tab-spinner",
+  "license": "MIT",
+  "keywords": [
+    "ghostty-tab-spinner",
+    "ghostty tab spinner",
+    "grok tab spinner",
+    "osc title",
+    "action required"
+  ]
 }

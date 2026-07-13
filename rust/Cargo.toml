@@ -1,6 +1,6 @@
 [package]
 name = "gts-title"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "Codex-style OSC 0 terminal/tab title helper for ghostty-tab-spinner"
 publish = false

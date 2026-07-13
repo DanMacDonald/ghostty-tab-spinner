@@ -1,5 +1,5 @@
 {
-  "description": "Codex-style tab spinner + Action Required alert on permission/input prompts",
+  "description": "Passive tab titles only: braille spinner while busy, Action Required on permission/input. Never blocks tools. No network.",
   "hooks": {
     "SessionStart": [
       {
