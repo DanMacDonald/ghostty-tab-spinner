@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# PreToolUse: ALWAYS exit 0 — never deny tools. Keep fast.
+# PreToolUse: keep spinner alive; ask_user_question → Action Required.
+# ALWAYS exit 0 — never deny tools.
 set +e
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck disable=SC1091
-source "$ROOT/common.sh" 2>/dev/null || exit 0
+# shellcheck source=common.sh
+source "$(cd "$(dirname "$0")" && pwd)/common.sh" 2>/dev/null || exit 0
 set +e
-
-should_run 2>/dev/null || exit 0
 
 payload=""
-if [[ ! -t 0 ]]; then
-  payload="$(cat 2>/dev/null || true)"
-fi
+[[ ! -t 0 ]] && payload="$(cat 2>/dev/null || true)"
 tool="$(read_hook_tool_name "$payload")"
 [[ -z "$tool" ]] && tool="${GROK_TOOL_NAME:-${CLAUDE_TOOL_NAME:-}}"
 
@@ -22,9 +18,7 @@ if is_user_input_tool "$tool"; then
   exit 0
 fi
 
-# Normal tool / after answering a question: ensure braille is running.
 stop_alert_loop 0 2>/dev/null || true
 touch "$(busy_flag)" 2>/dev/null || true
-touch "$(activity_file)" 2>/dev/null || true
 ensure_spinner_loop 2>/dev/null || true
 exit 0

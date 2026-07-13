@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# ghostty-tab-spinner — Codex-style OSC 0 tab spinner.
+# ghostty-tab-spinner — shared helpers for hook scripts.
 #
 # Titles:
-#   idle:  {project}              or  {project} - Grok  (if name collides)
-#   busy:  ⠋ {project}            or  ⠋ {project} - Grok
+#   idle:  {project}   or  {project} - Grok  (if basename collides)
+#   busy:  ⠋ {project}
+#   alert: [!] Action Required  ↔  [.] Action Required
 #
-# Collision = another live Grok session with the same basename(cwd)
-# (from ~/.grok/active_sessions.json). Cross-platform; no AppleScript.
+# Pure OSC to the session PTY. No AppleScript.
 #
-# IMPORTANT: when this file is *sourced* by hooks, do NOT enable `set -e`.
-# Hooks intentionally ignore failures; `set -e` was aborting on-busy/on-activity
-# before the spinner could start (user saw no tab animation).
+# IMPORTANT: when sourced by hooks, do NOT enable `set -e` — hooks must
+# fail open so a spinner glitch never blocks tools.
 if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
   set -euo pipefail
 else
@@ -18,8 +17,9 @@ else
   set -u 2>/dev/null || true
 fi
 
-# Fixed at source time — BASH_SOURCE is unreliable inside functions under `set -u`.
 _GTS_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# --- Paths ------------------------------------------------------------------
 
 plugin_root() {
   echo "${GROK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$_GTS_BIN_DIR/..}}"
@@ -36,6 +36,7 @@ plugin_data() {
     echo "$CLAUDE_PLUGIN_DATA"
     return
   fi
+  # Global-hooks install has no GROK_PLUGIN_DATA — fall back to TMPDIR.
   local d="${TMPDIR:-/tmp}/ghostty-tab-spinner/${GROK_SESSION_ID:-default}"
   mkdir -p "$d"
   echo "$d"
@@ -52,66 +53,9 @@ session_dir() {
 
 busy_flag() { echo "$(session_dir)/busy.flag"; }
 pid_file() { echo "$(session_dir)/spinner.pid"; }
-activity_file() { echo "$(session_dir)/activity.txt"; }
-last_title_file() { echo "$(session_dir)/last_title.txt"; }
-idle_token_file() { echo "$(session_dir)/idle_token"; }
-idle_grace_pid_file() { echo "$(session_dir)/idle_grace.pid"; }
 alert_flag() { echo "$(session_dir)/alert.flag"; }
 alert_pid_file() { echo "$(session_dir)/alert.pid"; }
-
-# Tab title while waiting for the user (permission / question / build prompt).
-alert_title() {
-  echo "${GHOSTTY_TAB_SPINNER_ALERT_TITLE:-Action Required}"
-}
-
-# Optional delay after Stop before clearing the tab spinner (seconds).
-# Default 0: stop with the turn. There is no hook for TUI "Responding...".
-# Only set >0 if you want a deliberate linger (not UI-synced).
-idle_grace_sec() {
-  echo "${GHOSTTY_TAB_SPINNER_IDLE_GRACE:-0}"
-}
-
-# Cancel a pending delayed-idle (new busy turn, or reschedule).
-cancel_idle_grace() {
-  local pf old
-  pf="$(idle_grace_pid_file)"
-  if [[ -f "$pf" ]]; then
-    old="$(cat "$pf" 2>/dev/null || true)"
-    if [[ -n "$old" && "$old" != "$$" ]]; then
-      kill -TERM "$old" 2>/dev/null || true
-    fi
-    rm -f "$pf" 2>/dev/null || true
-  fi
-  rm -f "$(idle_token_file)" 2>/dev/null || true
-}
-
-# Optional delayed idle when GHOSTTY_TAB_SPINNER_IDLE_GRACE > 0.
-schedule_idle_grace() {
-  local token grace script
-  grace="$(idle_grace_sec)"
-  # Treat empty/0 as immediate (caller should stop directly).
-  if [[ -z "$grace" || "$grace" == "0" || "$grace" == "0.0" ]]; then
-    return 1
-  fi
-  cancel_idle_grace
-  token="$(date +%s)-${RANDOM}-$$"
-  printf '%s' "$token" >"$(idle_token_file)"
-  script="$_GTS_BIN_DIR/delayed-idle.sh"
-
-  export GROK_SESSION_ID="${GROK_SESSION_ID:-default}"
-  export GROK_PLUGIN_DATA="${GROK_PLUGIN_DATA:-$(plugin_data)}"
-  export GROK_PLUGIN_ROOT="${GROK_PLUGIN_ROOT:-$(plugin_root)}"
-  export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-${PWD:-}}}"
-  export GHOSTTY_TAB_SPINNER_FORCE="${GHOSTTY_TAB_SPINNER_FORCE:-1}"
-  export GHOSTTY_TAB_SPINNER_DEBUG="${GHOSTTY_TAB_SPINNER_DEBUG:-}"
-  export GHOSTTY_TAB_SPINNER_IDLE_TOKEN="$token"
-  export GHOSTTY_TAB_SPINNER_IDLE_GRACE="$grace"
-
-  nohup bash "$script" </dev/null >>"$(session_dir)/idle_grace.stderr" 2>&1 &
-  echo $! >"$(idle_grace_pid_file)"
-  disown 2>/dev/null || true
-  hook_log "scheduled idle grace ${grace}s token=${token} pid=$(cat "$(idle_grace_pid_file)")"
-}
+last_title_file() { echo "$(session_dir)/last_title.txt"; }
 
 hook_log() {
   printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$(session_dir)/hook.log" 2>/dev/null || true
@@ -119,22 +63,16 @@ hook_log() {
   return 0
 }
 
-# Always try — hooks have no TTY; FORCE/env is optional.
-should_run() {
-  return 0
-}
-
-indicator_mode() {
-  echo "${GHOSTTY_TAB_SPINNER_MODE:-title}"
-}
-
 spinner_interval_sec() {
   echo "${GHOSTTY_TAB_SPINNER_INTERVAL:-0.1}"
 }
 
-# --- Titles (Codex-style) ---------------------------------------------------
+alert_title() {
+  echo "${GHOSTTY_TAB_SPINNER_ALERT_TITLE:-Action Required}"
+}
 
-# Project folder name only.
+# --- Titles -----------------------------------------------------------------
+
 project_basename() {
   local root="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-${PWD:-}}}"
   if [[ -n "$root" && "$root" != "/" ]]; then
@@ -173,16 +111,13 @@ for row in data:
     if not alive(row.get("pid")):
         continue
     cwd = row.get("cwd") or row.get("workspace") or ""
-    if not cwd:
-        continue
-    if Path(cwd).name == label:
+    if cwd and Path(cwd).name == label:
         count += 1
 
 sys.exit(0 if count >= 2 else 1)
 PY
 }
 
-# Codex label; append " - Grok" only when the project name collides.
 tab_label() {
   local base
   base="$(project_basename)"
@@ -193,8 +128,8 @@ tab_label() {
   fi
 }
 
-spin_label() { tab_label; }
 idle_title() { tab_label; }
+spin_label() { tab_label; }
 
 # --- TTY discovery ----------------------------------------------------------
 
@@ -247,18 +182,6 @@ discover_tty_from_process_tree() {
   return 1
 }
 
-discover_tty_from_grok_processes() {
-  local line gtty path
-  while IFS= read -r line; do
-    gtty="$(printf '%s' "$line" | awk '{print $2}')"
-    if path="$(normalize_tty_name "$gtty" 2>/dev/null)"; then
-      echo "$path"
-      return 0
-    fi
-  done < <(ps -axo pid=,tty=,command= 2>/dev/null | grep -E '(^|/)grok( |$)' | grep -v grep || true)
-  return 1
-}
-
 capture_tty() {
   local sd path t
   sd="$(session_dir)"
@@ -289,12 +212,6 @@ capture_tty() {
   if path="$(discover_tty_from_process_tree "$$" 2>/dev/null)"; then
     echo "$path" >"$sd/tty"
     hook_log "tty via process tree: $path"
-    echo "$path"
-    return 0
-  fi
-  if path="$(discover_tty_from_grok_processes 2>/dev/null)"; then
-    echo "$path" >"$sd/tty"
-    hook_log "tty via grok scan: $path"
     echo "$path"
     return 0
   fi
@@ -335,54 +252,17 @@ finally:
 
 # --- OSC titles -------------------------------------------------------------
 
-gts_title_bin() {
-  local here="$_GTS_BIN_DIR"
-  if [[ -x "$here/gts-title" ]]; then
-    echo "$here/gts-title"
-    return 0
-  fi
-  if [[ -x "$here/../rust/target/release/gts-title" ]]; then
-    echo "$here/../rust/target/release/gts-title"
-    return 0
-  fi
-  return 1
-}
-
 set_title_osc() {
   local title="$1"
-  # Prefer direct PTY write — `gts-title set` has hung/been killed under hook
-  # timeouts and blocked on-busy before the spinner could start.
-  write_tty "$(printf '\033]0;%s\007' "$title")"
-  [[ "${GHOSTTY_TAB_SPINNER_DEBUG:-}" == "1" ]] && hook_log "set_title_osc: $title"
+  # OSC 0 (icon+window) + OSC 2 (window). Prefer raw PTY write — gts-title set
+  # has hung under hook timeouts.
+  write_tty "$(printf '\033]0;%s\007\033]2;%s\007' "$title" "$title")"
   return 0
 }
 
-set_title() { set_title_osc "$1"; }
+# --- Process lifecycle ------------------------------------------------------
 
-set_busy_indicator() {
-  local mode label
-  mode="$(indicator_mode)"
-  label="$(spin_label)"
-  case "$mode" in
-    progress) ;;
-    both)
-      set_title_osc "⠋ ${label}" || true
-      ;;
-    *)
-      set_title_osc "⠋ ${label}" || true
-      ;;
-  esac
-}
-
-set_idle_indicator() {
-  set_title_osc "$(idle_title)" || true
-}
-
-# --- Spinner lifecycle ------------------------------------------------------
-
-# Kill process from a pidfile.
-# hard=1 → SIGKILL only (skip gts-title's SIGTERM idle-title restore — needed when
-# switching braille → Action Required, otherwise the tab snaps back to project name).
+# hard=1 → SIGKILL only (skip gts-title SIGTERM idle-restore when switching modes).
 _kill_pidfile() {
   local pf="$1" hard="${2:-0}" pid waited
   [[ -f "$pf" ]] || return 0
@@ -408,7 +288,6 @@ spinner_is_healthy() {
   local pf old
   pf="$(pid_file)"
   [[ -f "$(busy_flag)" ]] || return 1
-  # Alert mode owns the tab — don't treat braille as healthy.
   [[ -f "$(alert_flag)" ]] && return 1
   [[ -f "$pf" ]] || return 1
   old="$(cat "$pf" 2>/dev/null || true)"
@@ -426,21 +305,17 @@ alert_is_healthy() {
   kill -0 "$old" 2>/dev/null || return 1
 }
 
-ensure_spinner_loop() {
-  local mode pf loop
-  mode="$(indicator_mode)"
-  if [[ "$mode" != "title" && "$mode" != "both" ]]; then
-    hook_log "ensure_spinner skip mode=${mode}"
-    return 0
-  fi
-  [[ "${GHOSTTY_TAB_SPINNER_TITLE_LOOP:-1}" == "0" ]] && return 0
-  # Don't fight Action Required alert.
-  if [[ -f "$(alert_flag)" ]]; then
-    hook_log "ensure_spinner skip (alert active)"
-    return 0
-  fi
+_export_runtime_env() {
+  export GROK_SESSION_ID="${GROK_SESSION_ID:-default}"
+  export GROK_PLUGIN_DATA="${GROK_PLUGIN_DATA:-$(plugin_data)}"
+  export GROK_PLUGIN_ROOT="${GROK_PLUGIN_ROOT:-$(plugin_root)}"
+  export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-${PWD:-}}}"
+  export GHOSTTY_TAB_SPINNER_DEBUG="${GHOSTTY_TAB_SPINNER_DEBUG:-}"
+}
 
-  # Ensure busy flag exists so spinner-loop does not exit immediately.
+ensure_spinner_loop() {
+  local pf loop old
+  [[ -f "$(alert_flag)" ]] && return 0
   touch "$(busy_flag)" 2>/dev/null || true
 
   if spinner_is_healthy; then
@@ -449,43 +324,29 @@ ensure_spinner_loop() {
   fi
 
   pf="$(pid_file)"
-  # Drop stale pid without waiting (dead process).
   if [[ -f "$pf" ]]; then
-    local old
     old="$(cat "$pf" 2>/dev/null || true)"
     if [[ -n "$old" ]] && ! kill -0 "$old" 2>/dev/null; then
       rm -f "$pf" 2>/dev/null || true
     elif [[ -n "$old" ]]; then
-      # Stale healthy check failed for other reasons — hard replace.
       kill -9 "$old" 2>/dev/null || true
       rm -f "$pf" 2>/dev/null || true
     fi
   fi
 
-  export GROK_SESSION_ID="${GROK_SESSION_ID:-default}"
-  export GROK_PLUGIN_DATA="${GROK_PLUGIN_DATA:-$(plugin_data)}"
-  export GROK_PLUGIN_ROOT="${GROK_PLUGIN_ROOT:-$(plugin_root)}"
-  export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-${PWD:-}}}"
-  export GHOSTTY_TAB_SPINNER_FORCE="${GHOSTTY_TAB_SPINNER_FORCE:-1}"
-  export GHOSTTY_TAB_SPINNER_MODE="${GHOSTTY_TAB_SPINNER_MODE:-title}"
+  _export_runtime_env
   export GHOSTTY_TAB_SPINNER_INTERVAL="${GHOSTTY_TAB_SPINNER_INTERVAL:-}"
   export GHOSTTY_TAB_SPINNER_ASCII="${GHOSTTY_TAB_SPINNER_ASCII:-}"
-  export GHOSTTY_TAB_SPINNER_DEBUG="${GHOSTTY_TAB_SPINNER_DEBUG:-}"
   unset GHOSTTY_TAB_SPINNER_ALERT 2>/dev/null || true
 
   loop="$_GTS_BIN_DIR/spinner-loop.sh"
-  if [[ ! -x "$loop" && ! -f "$loop" ]]; then
-    hook_log "ensure_spinner FAIL no loop at $loop"
-    return 1
-  fi
+  [[ -f "$loop" ]] || { hook_log "ensure_spinner FAIL no loop at $loop"; return 1; }
   nohup bash "$loop" </dev/null >>"$(session_dir)/spinner.stderr" 2>&1 &
   echo $! >"$pf"
   disown 2>/dev/null || true
-  hook_log "started spinner pid=$(cat "$pf") label=$(spin_label) flag=$(busy_flag)"
+  hook_log "started spinner pid=$(cat "$pf") label=$(spin_label)"
 }
 
-# Codex-style attention title while waiting for user (permission / question).
-# Tab shows:  [!] Action Required  ↔  [.] Action Required
 start_alert_loop() {
   local pf loop title
   title="$(alert_title)"
@@ -496,65 +357,44 @@ start_alert_loop() {
     return 0
   fi
 
-  # Hard-kill braille so SIGTERM idle-restore does not snap tab back to project name.
   _kill_pidfile "$(pid_file)" 1
   rm -f "$(busy_flag)" 2>/dev/null || true
-
   touch "$(alert_flag)" 2>/dev/null || true
   pf="$(alert_pid_file)"
   rm -f "$pf" 2>/dev/null || true
 
-  export GROK_SESSION_ID="${GROK_SESSION_ID:-default}"
-  export GROK_PLUGIN_DATA="${GROK_PLUGIN_DATA:-$(plugin_data)}"
-  export GROK_PLUGIN_ROOT="${GROK_PLUGIN_ROOT:-$(plugin_root)}"
-  export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-${PWD:-}}}"
-  export GHOSTTY_TAB_SPINNER_FORCE="${GHOSTTY_TAB_SPINNER_FORCE:-1}"
-  export GHOSTTY_TAB_SPINNER_DEBUG="${GHOSTTY_TAB_SPINNER_DEBUG:-}"
+  _export_runtime_env
   export GHOSTTY_TAB_SPINNER_ALERT=1
   export GHOSTTY_TAB_SPINNER_ALERT_TITLE="$title"
   export GHOSTTY_TAB_SPINNER_INTERVAL="${GHOSTTY_TAB_SPINNER_ALERT_INTERVAL:-0.5}"
 
-  # Immediate title (before loop) via raw OSC + gts-title.
-  write_tty "$(printf '\033]0;%s\007' "[!] ${title}")" || true
   set_title_osc "[!] ${title}" || true
 
   loop="$_GTS_BIN_DIR/spinner-loop.sh"
   nohup bash "$loop" </dev/null >>"$(session_dir)/alert.stderr" 2>&1 &
   echo $! >"$pf"
   disown 2>/dev/null || true
-  hook_log "started alert pid=$(cat "$pf") title=${title} tty=$(resolve_tty 2>/dev/null || echo none)"
+  hook_log "started alert pid=$(cat "$pf") title=${title}"
 }
 
-# Stop alert title; optionally restore idle project name.
-# Fast path only (pidfile) — full `ps` scans blew the 5s hook timeout and
-# prevented on-busy from starting the spinner on some turns.
 stop_alert_loop() {
   local restore_idle="${1:-0}"
-  local pf
-  pf="$(alert_pid_file)"
   rm -f "$(alert_flag)" 2>/dev/null || true
-  _kill_pidfile "$pf" 1
-
+  _kill_pidfile "$(alert_pid_file)" 1
   if [[ "$restore_idle" == "1" ]]; then
     set_title_osc "$(idle_title)" || true
   fi
-  hook_log "stop_alert_loop restore_idle=${restore_idle}"
   return 0
 }
 
-# Stop braille spinner for *this* session only (pidfile only — keep it fast).
 stop_spinner_loop() {
-  local pf
-  pf="$(pid_file)"
-  rm -f "$(busy_flag)" "$(activity_file)" 2>/dev/null || true
-  # Hard kill: avoid gts-title writing idle title mid-transition when caller
-  # will set a new title immediately after.
-  _kill_pidfile "$pf" 1
-  hook_log "stop_spinner_loop done (session-local)"
+  rm -f "$(busy_flag)" 2>/dev/null || true
+  _kill_pidfile "$(pid_file)" 1
   return 0
 }
 
-# True if notification type means "user must respond".
+# --- Hook payload helpers ---------------------------------------------------
+
 is_action_required_notification() {
   local t
   t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -563,13 +403,11 @@ is_action_required_notification() {
     agent_needs_input|needs_input|user_input|elicitation_dialog|elicitation) return 0 ;;
     ask_user|ask_user_question|confirmation|confirm|prompt) return 0 ;;
     *permission*|*needs_input*|*elicitation*|*ask_user*) return 0 ;;
-    # idle_prompt = waiting for next chat message after a turn — not mid-task action.
     idle_prompt|auth_success|agent_completed|elicitation_complete|elicitation_response) return 1 ;;
     *) return 1 ;;
   esac
 }
 
-# Tools that block on user input (PreToolUse should enter alert, not busy).
 is_user_input_tool() {
   local t
   t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -580,7 +418,6 @@ is_user_input_tool() {
   esac
 }
 
-# Parse tool name from PreToolUse / PostToolUse stdin JSON.
 read_hook_tool_name() {
   local payload="${1-}"
   if [[ -z "$payload" ]] && [[ ! -t 0 ]]; then

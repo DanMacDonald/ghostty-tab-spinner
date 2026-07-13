@@ -66,11 +66,14 @@ fn sanitize_title(raw: &str) -> String {
     out
 }
 
-/// OSC 0 + BEL — same framing as Codex terminal_title.rs.
+/// OSC 0 + OSC 2 + BEL — Codex uses OSC 0; OSC 2 helps some terminals/tabs.
 fn osc0_payload(title: &str) -> Vec<u8> {
     let t = sanitize_title(title);
-    let mut buf = Vec::with_capacity(t.len() + 8);
+    let mut buf = Vec::with_capacity(t.len() * 2 + 16);
     buf.extend_from_slice(b"\x1b]0;");
+    buf.extend_from_slice(t.as_bytes());
+    buf.push(0x07); // BEL
+    buf.extend_from_slice(b"\x1b]2;");
     buf.extend_from_slice(t.as_bytes());
     buf.push(0x07); // BEL
     buf

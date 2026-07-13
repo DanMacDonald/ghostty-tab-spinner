@@ -3,7 +3,7 @@
   "version": "0.13.3",
   "description": "Codex-style OSC 0 braille tab spinner for Grok. Project-name titles; [!] Action Required while waiting for user input. Cross-platform (no AppleScript).",
   "author": {
-    "name": "local"
+    "name": "Dan MacDonald"
   },
   "keywords": [
     "ghostty",

@@ -3,6 +3,6 @@
   "version": "0.13.3",
   "description": "Codex-style braille spinner in the terminal tab title while Grok works. Shows [!] Action Required when waiting for user input. Pair with [ui.notifications.title] enabled=false.",
   "author": {
-    "name": "local"
+    "name": "Dan MacDonald"
   }
 }
