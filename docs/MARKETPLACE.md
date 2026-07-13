@@ -5,11 +5,18 @@ For maintainers opening a PR against
 
 ## Suggested catalog entry
 
-Pin `sha` to the release commit (full 40-char lowercase):
+Pin `sha` to a full **40-char lowercase commit** (not a tag name). For **v1.0.1**:
+
+```text
+a316d6abc3dcae31d44dd9fcd617ddab0c3e9fc4
+```
+
+Refresh anytime with:
 
 ```bash
 git ls-remote https://github.com/DanMacDonald/ghostty-tab-spinner.git HEAD
-# or: git rev-parse v1.0.1
+# or (annotated tag → commit):
+git rev-parse v1.0.1^{commit}
 ```
 
 ```json
@@ -20,7 +27,7 @@ git ls-remote https://github.com/DanMacDonald/ghostty-tab-spinner.git HEAD
   "source": {
     "source": "url",
     "url": "https://github.com/DanMacDonald/ghostty-tab-spinner.git",
-    "sha": "REPLACE_WITH_40_CHAR_COMMIT_SHA"
+    "sha": "a316d6abc3dcae31d44dd9fcd617ddab0c3e9fc4"
   },
   "homepage": "https://github.com/DanMacDonald/ghostty-tab-spinner",
   "keywords": [
