@@ -1,0 +1,104 @@
+{
+  "description": "Codex-style tab spinner + Action Required alert on permission/input prompts",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/session-start.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-busy.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-activity.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-post-tool.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-post-tool.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-notification.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-idle.sh\"",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/on-idle.sh\"",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/session-end.sh\"",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

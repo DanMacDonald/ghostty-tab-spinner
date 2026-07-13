@@ -1,0 +1,19 @@
+# Rust
+rust/target/
+**/*.rs.bk
+
+# Built helper (rebuild with scripts/build.sh)
+bin/gts-title
+
+# Local / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Runtime smoke / plugin data that should never ship
+.data-smoke/
+**/__pycache__/
+*.pyc
+*.log
