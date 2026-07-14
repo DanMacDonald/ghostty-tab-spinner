@@ -35,10 +35,18 @@ if [[ -z "${TTY_PATH:-}" ]]; then
 fi
 
 BIN_PATH="$(cd "$(dirname "$0")" && pwd)/gts-title"
-hook_log "spinner-loop mode=$([[ $ALERT_MODE == 1 ]] && echo alert || echo busy) label=${LABEL} tty=${TTY_PATH} ms=${INTERVAL_MS}"
+# Prefer path resolved by ensure_spinner_loop; fall back to live discovery.
+EVENTS_FILE="${GHOSTTY_TAB_SPINNER_EVENTS_FILE:-}"
+if [[ -z "$EVENTS_FILE" || ! -f "$EVENTS_FILE" ]]; then
+  EVENTS_FILE="$(events_jsonl 2>/dev/null || true)"
+fi
+hook_log "spinner-loop mode=$([[ $ALERT_MODE == 1 ]] && echo alert || echo busy) label=${LABEL} tty=${TTY_PATH} ms=${INTERVAL_MS} events=${EVENTS_FILE:-none}"
 
 if [[ -x "$BIN_PATH" ]]; then
   args=(spin --tty "$TTY_PATH" --label "$LABEL" --flag "$flag" --interval-ms "$INTERVAL_MS" --idle "$IDLE" --pid-file "$PF" --last-title-file "$(last_title_file)")
+  if [[ -n "${EVENTS_FILE:-}" ]]; then
+    args+=(--events-file "$EVENTS_FILE")
+  fi
   if [[ "$ALERT_MODE" == "1" ]]; then
     args+=(--alert)
   elif [[ "${GHOSTTY_TAB_SPINNER_ASCII:-0}" == "1" ]]; then
@@ -53,8 +61,21 @@ if [[ "$ALERT_MODE" == "1" ]]; then
 else
   frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 fi
+# Seek to EOF so we only react to turn_ended written after spin start (Ctrl-C, complete).
+EVENTS_OFF=0
+if [[ -n "${EVENTS_FILE:-}" && -f "$EVENTS_FILE" ]]; then
+  EVENTS_OFF="$(wc -c <"$EVENTS_FILE" 2>/dev/null | tr -d ' ' || echo 0)"
+fi
 i=0
 while [[ -f "$flag" ]]; do
+  if [[ -n "${EVENTS_FILE:-}" ]]; then
+    if new_off="$(events_saw_turn_ended "$EVENTS_FILE" "$EVENTS_OFF")"; then
+      hook_log "spinner-loop: turn_ended in events.jsonl — clearing"
+      rm -f "$flag" "$(busy_flag)" "$(alert_flag)" 2>/dev/null || true
+      break
+    fi
+    EVENTS_OFF="${new_off:-$EVENTS_OFF}"
+  fi
   write_tty "$(printf '\033]0;%s %s\007\033]2;%s %s\007' "${frames[i]}" "$LABEL" "${frames[i]}" "$LABEL")"
   i=$(( (i + 1) % ${#frames[@]} ))
   if [[ "$ALERT_MODE" == "1" ]]; then

@@ -30,7 +30,7 @@ They do **not** read source code, execute user project commands, or call the net
 | `UserPromptSubmit` | `bin/on-busy.sh` | Start braille spinner process |
 | `PreToolUse` | `bin/on-activity.sh` | Keep spinner alive; never blocks tools |
 | `PostToolUse` / `PostToolUseFailure` | `bin/on-post-tool.sh` | Clear Action Required; resume spinner |
-| `Notification` | `bin/on-notification.sh` | Action Required title for permission / elicitation |
+| `Notification` | `bin/on-notification.sh` | Action Required on permission / elicitation; clear spinner on idle/completed |
 | `Stop` / `StopFailure` | `bin/on-idle.sh` | Stop spinner; restore project title |
 | `SessionEnd` | `bin/session-end.sh` | Cleanup |
 

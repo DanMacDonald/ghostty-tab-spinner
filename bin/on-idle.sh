@@ -6,16 +6,6 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 set +e
 
 hook_log "on-idle enter event=${GROK_HOOK_EVENT:-?} session=${GROK_SESSION_ID:-?}"
-
-stop_alert_loop 0 2>/dev/null || true
-stop_spinner_loop 2>/dev/null || true
-sleep 0.05 2>/dev/null
-
-idle="$(idle_title)"
-for _ in 1 2 3; do
-  set_title_osc "$idle" 2>/dev/null || true
-  sleep 0.03 2>/dev/null
-done
-
-hook_log "on-idle done restored=${idle}"
+go_idle 2>/dev/null || true
+hook_log "on-idle done"
 exit 0

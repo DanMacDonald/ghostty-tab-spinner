@@ -57,6 +57,75 @@ alert_flag() { echo "$(session_dir)/alert.flag"; }
 alert_pid_file() { echo "$(session_dir)/alert.pid"; }
 last_title_file() { echo "$(session_dir)/last_title.txt"; }
 
+# Grok session events.jsonl — authoritative turn lifecycle (includes Ctrl-C cancel).
+# Path: ~/.grok/sessions/<urlencoded-cwd>/<session_id>/events.jsonl
+# Note: GROK_WORKSPACE_ROOT often has a trailing slash; Grok stores sessions without it.
+events_jsonl() {
+  local root sid encoded f found
+  sid="${GROK_SESSION_ID:-}"
+  [[ -n "$sid" && "$sid" != "default" ]] || return 1
+
+  root="${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+  # Strip trailing slashes so encoding matches ~/.grok/sessions layout.
+  root="${root%/}"
+  while [[ "$root" == */ ]]; do root="${root%/}"; done
+
+  if [[ -n "$root" ]]; then
+    encoded="$(
+      python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$root" 2>/dev/null
+    )" || encoded=""
+    if [[ -n "$encoded" ]]; then
+      f="${HOME}/.grok/sessions/${encoded}/${sid}/events.jsonl"
+      if [[ -f "$f" ]]; then
+        echo "$f"
+        return 0
+      fi
+    fi
+  fi
+
+  # Fallback: locate by session id (handles path encoding mismatches).
+  found="$(
+    find "${HOME}/.grok/sessions" -maxdepth 2 -type f -path "*/${sid}/events.jsonl" 2>/dev/null | head -n 1
+  )"
+  if [[ -n "$found" && -f "$found" ]]; then
+    echo "$found"
+    return 0
+  fi
+  return 1
+}
+
+# True if events.jsonl grew a turn_ended line after byte offset $2 (file path $1).
+# Prints new offset on stdout when called; exit 0 if turn_ended seen.
+events_saw_turn_ended() {
+  local path="$1" offset="${2:-0}"
+  [[ -f "$path" ]] || return 1
+  python3 - "$path" "$offset" <<'PY' 2>/dev/null
+import sys
+path, offset_s = sys.argv[1], sys.argv[2]
+offset = int(offset_s or "0")
+try:
+    size = __import__("os").path.getsize(path)
+except OSError:
+    print(offset)
+    raise SystemExit(1)
+if size < offset:
+    offset = 0
+if size == offset:
+    print(offset)
+    raise SystemExit(1)
+with open(path, "rb") as f:
+    f.seek(offset)
+    data = f.read()
+new_offset = offset + len(data)
+print(new_offset)
+text = data.decode("utf-8", errors="replace")
+for line in text.splitlines():
+    if '"type"' in line and "turn_ended" in line:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 hook_log() {
   printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$(session_dir)/hook.log" 2>/dev/null || true
   [[ "${GHOSTTY_TAB_SPINNER_DEBUG:-}" == "1" ]] && printf '[gts] %s\n' "$*" >&2
@@ -314,7 +383,7 @@ _export_runtime_env() {
 }
 
 ensure_spinner_loop() {
-  local pf loop old
+  local pf loop old events
   [[ -f "$(alert_flag)" ]] && return 0
   touch "$(busy_flag)" 2>/dev/null || true
 
@@ -335,20 +404,33 @@ ensure_spinner_loop() {
   fi
 
   _export_runtime_env
+  # Normalize workspace root (hooks often include a trailing slash).
+  if [[ -n "${GROK_WORKSPACE_ROOT:-}" ]]; then
+    export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT%/}"
+  fi
   export GHOSTTY_TAB_SPINNER_INTERVAL="${GHOSTTY_TAB_SPINNER_INTERVAL:-}"
   export GHOSTTY_TAB_SPINNER_ASCII="${GHOSTTY_TAB_SPINNER_ASCII:-}"
   unset GHOSTTY_TAB_SPINNER_ALERT 2>/dev/null || true
+
+  # Resolve events path up front and pass via env so spinner always can watch turn_ended.
+  events="$(events_jsonl 2>/dev/null || true)"
+  if [[ -n "$events" ]]; then
+    export GHOSTTY_TAB_SPINNER_EVENTS_FILE="$events"
+  else
+    unset GHOSTTY_TAB_SPINNER_EVENTS_FILE 2>/dev/null || true
+    hook_log "ensure_spinner: events.jsonl not found (sid=${GROK_SESSION_ID:-?} root=${GROK_WORKSPACE_ROOT:-?})"
+  fi
 
   loop="$_GTS_BIN_DIR/spinner-loop.sh"
   [[ -f "$loop" ]] || { hook_log "ensure_spinner FAIL no loop at $loop"; return 1; }
   nohup bash "$loop" </dev/null >>"$(session_dir)/spinner.stderr" 2>&1 &
   echo $! >"$pf"
   disown 2>/dev/null || true
-  hook_log "started spinner pid=$(cat "$pf") label=$(spin_label)"
+  hook_log "started spinner pid=$(cat "$pf") label=$(spin_label) events=${events:-none}"
 }
 
 start_alert_loop() {
-  local pf loop title
+  local pf loop title events
   title="$(alert_title)"
   capture_tty >/dev/null 2>&1 || true
 
@@ -364,9 +446,18 @@ start_alert_loop() {
   rm -f "$pf" 2>/dev/null || true
 
   _export_runtime_env
+  if [[ -n "${GROK_WORKSPACE_ROOT:-}" ]]; then
+    export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT%/}"
+  fi
   export GHOSTTY_TAB_SPINNER_ALERT=1
   export GHOSTTY_TAB_SPINNER_ALERT_TITLE="$title"
   export GHOSTTY_TAB_SPINNER_INTERVAL="${GHOSTTY_TAB_SPINNER_ALERT_INTERVAL:-0.5}"
+  events="$(events_jsonl 2>/dev/null || true)"
+  if [[ -n "$events" ]]; then
+    export GHOSTTY_TAB_SPINNER_EVENTS_FILE="$events"
+  else
+    unset GHOSTTY_TAB_SPINNER_EVENTS_FILE 2>/dev/null || true
+  fi
 
   set_title_osc "[!] ${title}" || true
 
@@ -374,7 +465,7 @@ start_alert_loop() {
   nohup bash "$loop" </dev/null >>"$(session_dir)/alert.stderr" 2>&1 &
   echo $! >"$pf"
   disown 2>/dev/null || true
-  hook_log "started alert pid=$(cat "$pf") title=${title}"
+  hook_log "started alert pid=$(cat "$pf") title=${title} events=${events:-none}"
 }
 
 stop_alert_loop() {
@@ -388,8 +479,26 @@ stop_alert_loop() {
 }
 
 stop_spinner_loop() {
+  # Drop the flag first so gts-title (or bash fallback) exits its loop and
+  # writes the idle title. Prefer SIGTERM over SIGKILL so the clean restore
+  # path runs; only escalate if the process sticks around.
   rm -f "$(busy_flag)" 2>/dev/null || true
-  _kill_pidfile "$(pid_file)" 1
+  _kill_pidfile "$(pid_file)" 0
+  return 0
+}
+
+# Stop spinner/alert and re-assert idle project title (used by Stop + idle notifs).
+go_idle() {
+  local idle
+  stop_alert_loop 0 2>/dev/null || true
+  stop_spinner_loop 2>/dev/null || true
+  sleep 0.05 2>/dev/null || true
+  idle="$(idle_title)"
+  for _ in 1 2 3; do
+    set_title_osc "$idle" 2>/dev/null || true
+    sleep 0.03 2>/dev/null || true
+  done
+  hook_log "go_idle restored=${idle}"
   return 0
 }
 
@@ -404,6 +513,18 @@ is_action_required_notification() {
     ask_user|ask_user_question|confirmation|confirm|prompt) return 0 ;;
     *permission*|*needs_input*|*elicitation*|*ask_user*) return 0 ;;
     idle_prompt|auth_success|agent_completed|elicitation_complete|elicitation_response) return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Notifications that mean the agent is no longer working (e.g. after Ctrl-C).
+# Stop may not always fire on interrupt-during-thinking; idle_prompt still does.
+is_idle_notification() {
+  local t
+  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$t" in
+    idle_prompt|idle|agent_completed|agent_complete|turn_complete|turn_completed|task_complete)
+      return 0 ;;
     *) return 1 ;;
   esac
 }

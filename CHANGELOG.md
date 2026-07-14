@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Clear spinner on Ctrl-C / cancel even when Stop hooks do not fire: watch Grok's
+  session `events.jsonl` for `turn_ended` (including `outcome: cancelled`)
+- Fix events path discovery when `GROK_WORKSPACE_ROOT` has a trailing slash
+  (was the reason spinner never attached to events.jsonl)
+- Also treat `idle_prompt` / `agent_completed` notifications as idle
+- Soft-stop the spinner process (SIGTERM first) so the idle title is restored
+
 ## 1.0.1
 
 - Add `.grok-plugin/plugin.json` (Grok-native manifest)

@@ -75,9 +75,12 @@ If titles never change after a plugin-only install, use `./scripts/install.sh`
 SessionStart      →  idle project title (+ short re-assert vs default "grok")
 UserPromptSubmit  →  start braille spinner (~100ms)
 PreToolUse        →  keep spinner; ask_user_question → Action Required
-Notification      →  permission / elicitation → Action Required
+Notification      →  permission / elicitation → Action Required;
+                      idle_prompt / agent_completed → clear spinner
 PostToolUse       →  clear alert, resume braille
 Stop / SessionEnd →  restore project title
+(spinner also tails ~/.grok/sessions/…/events.jsonl for turn_ended —
+ covers Ctrl-C cancel when Stop hooks skip)
 ```
 
 Hooks are **passive** (always allow tools). Details: [SECURITY.md](SECURITY.md).

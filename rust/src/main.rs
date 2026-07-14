@@ -10,7 +10,7 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
@@ -30,10 +30,60 @@ gts-title — Codex-style OSC 0 title helper
   gts-title set  --tty PATH --title TEXT
   gts-title spin --tty PATH --label NAME --flag PATH \\
                  [--interval-ms 100] [--idle TEXT] [--ascii] [--alert] \\
-                 [--pid-file PATH] [--last-title-file PATH]
+                 [--pid-file PATH] [--last-title-file PATH] \\
+                 [--events-file PATH]
 "
     );
     process::exit(2);
+}
+
+/// Tail Grok's session events.jsonl for a new `turn_ended` (completed or cancelled).
+/// Ctrl-C mid-turn writes turn_ended even when Stop hooks do not fire.
+struct EventsTail {
+    path: PathBuf,
+    offset: u64,
+}
+
+impl EventsTail {
+    fn open(path: PathBuf) -> Self {
+        let offset = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        Self { path, offset }
+    }
+
+    /// Returns true if a new turn_ended line appeared since the last check.
+    fn poll_turn_ended(&mut self) -> bool {
+        let meta = match fs::metadata(&self.path) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        let len = meta.len();
+        if len < self.offset {
+            // File truncated / rotated.
+            self.offset = 0;
+        }
+        if len == self.offset {
+            return false;
+        }
+        let mut f = match File::open(&self.path) {
+            Ok(f) => f,
+            Err(_) => return false,
+        };
+        if f.seek(SeekFrom::Start(self.offset)).is_err() {
+            return false;
+        }
+        let mut buf = String::new();
+        if f.read_to_string(&mut buf).is_err() {
+            return false;
+        }
+        self.offset = len;
+        for line in buf.lines() {
+            // Grok writes: {"ts":"...","type":"turn_ended","outcome":"cancelled",...}
+            if line.contains("turn_ended") && line.contains("\"type\"") {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 fn sanitize_title(raw: &str) -> String {
@@ -139,6 +189,7 @@ fn cmd_spin(mut args: Vec<String>) {
         .unwrap_or(if alert { 500 } else { 100 });
     let pid_file = take_flag(&mut args, "--pid-file");
     let last_title_file = take_flag(&mut args, "--last-title-file");
+    let events_file = take_flag(&mut args, "--events-file");
 
     if let Some(ref p) = pid_file {
         let _ = fs::write(p, format!("{}\n", process::id()));
@@ -153,6 +204,7 @@ fn cmd_spin(mut args: Vec<String>) {
     };
     let flag_path = PathBuf::from(&flag);
     let tty_path = PathBuf::from(&tty);
+    let mut events = events_file.map(|p| EventsTail::open(PathBuf::from(p)));
 
     let mut file = match open_tty(&tty_path) {
         Ok(f) => f,
@@ -165,7 +217,9 @@ fn cmd_spin(mut args: Vec<String>) {
     // Best-effort restore on signals.
     let idle_for_handler = idle.clone();
     let tty_for_handler = tty.clone();
+    let flag_for_handler = flag.clone();
     ctrlc_shim(move || {
+        let _ = fs::remove_file(&flag_for_handler);
         let _ = write_title_path(Path::new(&tty_for_handler), &idle_for_handler);
         process::exit(0);
     });
@@ -173,8 +227,17 @@ fn cmd_spin(mut args: Vec<String>) {
     let mut i: usize = 0;
     let mut last = String::new();
     let interval = Duration::from_millis(interval_ms);
+    let mut ended_via_events = false;
 
     while flag_path.is_file() {
+        // Grok writes turn_ended on complete *and* Ctrl-C cancel — hooks often miss cancel.
+        if let Some(ref mut ev) = events {
+            if ev.poll_turn_ended() {
+                ended_via_events = true;
+                break;
+            }
+        }
+
         let t0 = Instant::now();
         let frame = frames[i % frames.len()];
         let title = if label.is_empty() {
@@ -196,14 +259,28 @@ fn cmd_spin(mut args: Vec<String>) {
 
         let elapsed = t0.elapsed();
         if elapsed < interval {
-            // Sleep in small slices so flag removal is noticed quickly.
+            // Sleep in small slices so flag removal / events are noticed quickly.
             let mut left = interval - elapsed;
             while left > Duration::ZERO && flag_path.is_file() {
+                if let Some(ref mut ev) = events {
+                    if ev.poll_turn_ended() {
+                        ended_via_events = true;
+                        break;
+                    }
+                }
                 let slice = left.min(Duration::from_millis(20));
                 thread::sleep(slice);
                 left = left.saturating_sub(slice);
             }
+            if ended_via_events {
+                break;
+            }
         }
+    }
+
+    if ended_via_events {
+        // Drop busy/alert flags so hooks do not think we are still spinning.
+        let _ = fs::remove_file(&flag_path);
     }
 
     // Always strip spinner glyph when we stop.

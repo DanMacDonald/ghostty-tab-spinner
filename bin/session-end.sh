@@ -2,7 +2,5 @@
 set +e
 # shellcheck source=common.sh
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-stop_alert_loop 0
-stop_spinner_loop
-set_title_osc "$(idle_title)" || true
+go_idle 2>/dev/null || true
 exit 0

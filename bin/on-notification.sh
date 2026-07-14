@@ -47,6 +47,13 @@ if [[ -z "$ntype" ]]; then
   exit 0
 fi
 
+# Ctrl-C / cancel during thinking sometimes skips Stop; idle notifications still fire.
+if is_idle_notification "$ntype"; then
+  hook_log "on-notification idle-clear type=${ntype}"
+  go_idle 2>/dev/null || true
+  exit 0
+fi
+
 if is_action_required_notification "$ntype"; then
   start_alert_loop || true
 fi
