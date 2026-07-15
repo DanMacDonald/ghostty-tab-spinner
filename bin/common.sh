@@ -2,8 +2,8 @@
 # ghostty-tab-spinner — shared helpers for hook scripts.
 #
 # Titles:
-#   idle:  {project}   or  {project} - Grok  (if basename collides)
-#   busy:  ⠋ {project}
+#   idle:  {project} - Grok
+#   busy:  ⠋ {project} - Grok
 #   alert: [!] Action Required  ↔  [.] Action Required
 #
 # Pure OSC to the session PTY. No AppleScript.
@@ -151,50 +151,11 @@ project_basename() {
   fi
 }
 
-# True if >=2 live Grok sessions share this project basename.
-project_name_collides() {
-  local label="$1"
-  local f="${HOME}/.grok/active_sessions.json"
-  [[ -f "$f" ]] || return 1
-  python3 - "$f" "$label" <<'PY' 2>/dev/null
-import json, os, sys
-from pathlib import Path
-
-path, label = sys.argv[1], sys.argv[2]
-try:
-    data = json.load(open(path))
-except Exception:
-    sys.exit(1)
-if not isinstance(data, list):
-    sys.exit(1)
-
-def alive(pid):
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except Exception:
-        return False
-
-count = 0
-for row in data:
-    if not alive(row.get("pid")):
-        continue
-    cwd = row.get("cwd") or row.get("workspace") or ""
-    if cwd and Path(cwd).name == label:
-        count += 1
-
-sys.exit(0 if count >= 2 else 1)
-PY
-}
-
+# Always include " - Grok" so tabs are easy to spot among other terminals.
 tab_label() {
   local base
   base="$(project_basename)"
-  if [[ -n "${GHOSTTY_TAB_SPINNER_FORCE_DISAMBIG:-}" ]] || project_name_collides "$base"; then
-    printf '%s - Grok' "$base"
-  else
-    printf '%s' "$base"
-  fi
+  printf '%s - Grok' "$base"
 }
 
 idle_title() { tab_label; }

@@ -9,13 +9,12 @@ credentials. MIT licensed.
 
 | Situation | Title |
 |-----------|--------|
-| Idle (one session for this project) | `MyProject` |
-| Idle (name collides with another live session) | `MyProject - Grok` |
-| Agent busy | `⠋ MyProject` (animating braille) |
+| Idle | `MyProject - Grok` |
+| Agent busy | `⠋ MyProject - Grok` (animating braille) |
 | Waiting for your input | `[!] Action Required` ↔ `[.] Action Required` |
 
 **Note:** This changes Grok’s default tab-title behavior. Instead of the built-in
-verbose status messages on the tab, you get the project name (with a spinner
+verbose status messages on the tab, you get `{project} - Grok` (with a spinner
 while the agent is working, and **Action Required** when input is needed). That
 is intentional: the install steps disable Grok’s own title updates so they do
 not fight this plugin.
@@ -72,13 +71,13 @@ If titles never change after a plugin-only install, use `./scripts/install.sh`
 ## How it works
 
 ```text
-SessionStart      →  idle project title (+ short re-assert vs default "grok")
-UserPromptSubmit  →  start braille spinner (~100ms)
+SessionStart      →  idle "{project} - Grok" (+ short re-assert vs default "grok")
+UserPromptSubmit  →  start braille spinner on "{project} - Grok" (~100ms)
 PreToolUse        →  keep spinner; ask_user_question → Action Required
 Notification      →  permission / elicitation → Action Required;
                       idle_prompt / agent_completed → clear spinner
 PostToolUse       →  clear alert, resume braille
-Stop / SessionEnd →  restore project title
+Stop / SessionEnd →  restore "{project} - Grok"
 (spinner also tails ~/.grok/sessions/…/events.jsonl for turn_ended —
  covers Ctrl-C cancel when Stop hooks skip)
 ```
@@ -103,7 +102,6 @@ unless you intend only one to run.
 | `GHOSTTY_TAB_SPINNER_INTERVAL` | `0.1` | Seconds between braille frames |
 | `GHOSTTY_TAB_SPINNER_ASCII=1` | off | ASCII `\| / - \` frames |
 | `GHOSTTY_TAB_SPINNER_DEBUG=1` | off | Verbose logs to stderr |
-| `GHOSTTY_TAB_SPINNER_FORCE_DISAMBIG=1` | off | Always append ` - Grok` |
 | `GHOSTTY_TAB_SPINNER_ALERT_TITLE` | `Action Required` | Alert label |
 | `GHOSTTY_TAB_SPINNER_ALERT_INTERVAL` | `0.5` | Seconds between `[!]` / `[.]` |
 
