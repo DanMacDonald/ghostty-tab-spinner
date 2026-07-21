@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Always use `{project} - Grok` for idle and busy tab titles
+- Use lowercase `{project} - grok` so Herdr idle OSC detection works (capital
+  `Grok` left the sidebar stuck on working forever)
+- Herdr: static titles (no braille thrash) + pane metadata; document sidebar
+  `terminal_title_stripped` layout for Grok
+- Always append ` - grok` on idle and busy tab titles
 - Clear spinner on Ctrl-C / cancel even when Stop hooks do not fire: watch Grok's
   session `events.jsonl` for `turn_ended` (including `outcome: cancelled`)
 - Fix events path discovery when `GROK_WORKSPACE_ROOT` has a trailing slash

@@ -2,9 +2,13 @@
 # ghostty-tab-spinner — shared helpers for hook scripts.
 #
 # Titles:
-#   idle:  {project} - Grok
-#   busy:  ⠋ {project} - Grok
+#   idle:  {project} - grok
+#   busy:  ⠋ {project} - grok
 #   alert: [!] Action Required  ↔  [.] Action Required
+#
+# Suffix is lowercase "grok" on purpose: Herdr's Grok agent manifest treats
+# OSC titles matching `(?:^| - )grok$` as idle. Capital "Grok" fails that
+# rule, so any non-empty title sticks the sidebar on "working" forever.
 #
 # Pure OSC to the session PTY. No AppleScript.
 #
@@ -151,15 +155,56 @@ project_basename() {
   fi
 }
 
-# Always include " - Grok" so tabs are easy to spot among other terminals.
+# Always include " - grok" so tabs are easy to spot among other terminals.
+# Lowercase "grok" matches Herdr idle OSC detection (see header comment).
 tab_label() {
   local base
   base="$(project_basename)"
-  printf '%s - Grok' "$base"
+  printf '%s - grok' "$base"
 }
 
 idle_title() { tab_label; }
 spin_label() { tab_label; }
+
+# --- Herdr (agent multiplexer) ----------------------------------------------
+# Inside Herdr, OSC title changes can trigger full UI re-renders of the sidebar.
+# Animated braille frames thrash the sidebar; use a single static title instead
+# and let Herdr's state_icon show working/blocked. Still write OSC so
+# terminal_title / terminal_title_stripped stay useful as the "tab name".
+
+in_herdr() {
+  [[ -n "${HERDR_PANE_ID:-}" || -n "${HERDR_SOCKET_PATH:-}" || "${HERDR_ENV:-}" == "1" ]]
+}
+
+# Best-effort: push a stable pane title + $summary for Herdr sidebar tokens.
+herdr_report_title() {
+  local title="$1" pane bin
+  in_herdr || return 0
+  pane="${HERDR_PANE_ID:-}"
+  [[ -n "$pane" ]] || return 0
+  bin="$(command -v herdr 2>/dev/null || true)"
+  [[ -n "$bin" ]] || return 0
+  # Prefer socket from env when present.
+  if [[ -n "${HERDR_SOCKET_PATH:-}" ]]; then
+    HERDR_SOCKET_PATH="$HERDR_SOCKET_PATH" "$bin" pane report-metadata "$pane" \
+      --source ghostty-tab-spinner \
+      --title "$title" \
+      --token "summary=$title" >/dev/null 2>&1 || true
+  else
+    "$bin" pane report-metadata "$pane" \
+      --source ghostty-tab-spinner \
+      --title "$title" \
+      --token "summary=$title" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+# OSC to the PTY + Herdr metadata (stable sidebar label).
+set_display_title() {
+  local title="$1"
+  set_title_osc "$title" 2>/dev/null || true
+  herdr_report_title "$title" 2>/dev/null || true
+}
 
 # --- TTY discovery ----------------------------------------------------------
 
@@ -369,6 +414,10 @@ ensure_spinner_loop() {
   if [[ -n "${GROK_WORKSPACE_ROOT:-}" ]]; then
     export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT%/}"
   fi
+  # Carry Herdr env into the background loop (static titles under Herdr).
+  export HERDR_PANE_ID="${HERDR_PANE_ID:-}"
+  export HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH:-}"
+  export HERDR_ENV="${HERDR_ENV:-}"
   export GHOSTTY_TAB_SPINNER_INTERVAL="${GHOSTTY_TAB_SPINNER_INTERVAL:-}"
   export GHOSTTY_TAB_SPINNER_ASCII="${GHOSTTY_TAB_SPINNER_ASCII:-}"
   unset GHOSTTY_TAB_SPINNER_ALERT 2>/dev/null || true
@@ -387,7 +436,7 @@ ensure_spinner_loop() {
   nohup bash "$loop" </dev/null >>"$(session_dir)/spinner.stderr" 2>&1 &
   echo $! >"$pf"
   disown 2>/dev/null || true
-  hook_log "started spinner pid=$(cat "$pf") label=$(spin_label) events=${events:-none}"
+  hook_log "started spinner pid=$(cat "$pf") label=$(spin_label) events=${events:-none} herdr=$(in_herdr && echo 1 || echo 0)"
 }
 
 start_alert_loop() {
@@ -410,6 +459,9 @@ start_alert_loop() {
   if [[ -n "${GROK_WORKSPACE_ROOT:-}" ]]; then
     export GROK_WORKSPACE_ROOT="${GROK_WORKSPACE_ROOT%/}"
   fi
+  export HERDR_PANE_ID="${HERDR_PANE_ID:-}"
+  export HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH:-}"
+  export HERDR_ENV="${HERDR_ENV:-}"
   export GHOSTTY_TAB_SPINNER_ALERT=1
   export GHOSTTY_TAB_SPINNER_ALERT_TITLE="$title"
   export GHOSTTY_TAB_SPINNER_INTERVAL="${GHOSTTY_TAB_SPINNER_ALERT_INTERVAL:-0.5}"
@@ -420,13 +472,18 @@ start_alert_loop() {
     unset GHOSTTY_TAB_SPINNER_EVENTS_FILE 2>/dev/null || true
   fi
 
-  set_title_osc "[!] ${title}" || true
+  # Static title under Herdr (no [!]/[.] blink thrash); animated elsewhere.
+  if in_herdr; then
+    set_display_title "[!] ${title}" || true
+  else
+    set_title_osc "[!] ${title}" || true
+  fi
 
   loop="$_GTS_BIN_DIR/spinner-loop.sh"
   nohup bash "$loop" </dev/null >>"$(session_dir)/alert.stderr" 2>&1 &
   echo $! >"$pf"
   disown 2>/dev/null || true
-  hook_log "started alert pid=$(cat "$pf") title=${title} events=${events:-none}"
+  hook_log "started alert pid=$(cat "$pf") title=${title} events=${events:-none} herdr=$(in_herdr && echo 1 || echo 0)"
 }
 
 stop_alert_loop() {
@@ -434,7 +491,7 @@ stop_alert_loop() {
   rm -f "$(alert_flag)" 2>/dev/null || true
   _kill_pidfile "$(alert_pid_file)" 1
   if [[ "$restore_idle" == "1" ]]; then
-    set_title_osc "$(idle_title)" || true
+    set_display_title "$(idle_title)" || true
   fi
   return 0
 }
@@ -456,7 +513,7 @@ go_idle() {
   sleep 0.05 2>/dev/null || true
   idle="$(idle_title)"
   for _ in 1 2 3; do
-    set_title_osc "$idle" 2>/dev/null || true
+    set_display_title "$idle" 2>/dev/null || true
     sleep 0.03 2>/dev/null || true
   done
   hook_log "go_idle restored=${idle}"

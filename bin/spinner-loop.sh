@@ -40,7 +40,44 @@ EVENTS_FILE="${GHOSTTY_TAB_SPINNER_EVENTS_FILE:-}"
 if [[ -z "$EVENTS_FILE" || ! -f "$EVENTS_FILE" ]]; then
   EVENTS_FILE="$(events_jsonl 2>/dev/null || true)"
 fi
-hook_log "spinner-loop mode=$([[ $ALERT_MODE == 1 ]] && echo alert || echo busy) label=${LABEL} tty=${TTY_PATH} ms=${INTERVAL_MS} events=${EVENTS_FILE:-none}"
+
+# Herdr: static title only. Animated OSC frames thrash the sidebar (full re-render
+# on every terminal_title change). Still watch events.jsonl for Ctrl-C cancel.
+HERDR_STATIC=0
+if in_herdr; then
+  HERDR_STATIC=1
+fi
+
+hook_log "spinner-loop mode=$([[ $ALERT_MODE == 1 ]] && echo alert || echo busy) label=${LABEL} tty=${TTY_PATH} ms=${INTERVAL_MS} events=${EVENTS_FILE:-none} herdr_static=${HERDR_STATIC}"
+
+if [[ "$HERDR_STATIC" == "1" ]]; then
+  if [[ -n "$PF" ]]; then
+    echo $$ >"$PF" 2>/dev/null || true
+  fi
+  if [[ "$ALERT_MODE" == "1" ]]; then
+    STATIC_TITLE="[!] ${LABEL}"
+  else
+    STATIC_TITLE="⠋ ${LABEL}"
+  fi
+  set_display_title "$STATIC_TITLE" 2>/dev/null || true
+  EVENTS_OFF=0
+  if [[ -n "${EVENTS_FILE:-}" && -f "$EVENTS_FILE" ]]; then
+    EVENTS_OFF="$(wc -c <"$EVENTS_FILE" 2>/dev/null | tr -d ' ' || echo 0)"
+  fi
+  while [[ -f "$flag" ]]; do
+    if [[ -n "${EVENTS_FILE:-}" ]]; then
+      if new_off="$(events_saw_turn_ended "$EVENTS_FILE" "$EVENTS_OFF")"; then
+        hook_log "spinner-loop: turn_ended in events.jsonl — clearing (herdr static)"
+        rm -f "$flag" "$(busy_flag)" "$(alert_flag)" 2>/dev/null || true
+        break
+      fi
+      EVENTS_OFF="${new_off:-$EVENTS_OFF}"
+    fi
+    sleep 0.2 2>/dev/null || sleep 1
+  done
+  set_display_title "$IDLE" 2>/dev/null || true
+  exit 0
+fi
 
 if [[ -x "$BIN_PATH" ]]; then
   args=(spin --tty "$TTY_PATH" --label "$LABEL" --flag "$flag" --interval-ms "$INTERVAL_MS" --idle "$IDLE" --pid-file "$PF" --last-title-file "$(last_title_file)")

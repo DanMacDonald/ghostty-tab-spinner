@@ -9,15 +9,16 @@ credentials. MIT licensed.
 
 | Situation | Title |
 |-----------|--------|
-| Idle | `MyProject - Grok` |
-| Agent busy | `⠋ MyProject - Grok` (animating braille) |
+| Idle | `MyProject - grok` |
+| Agent busy | `⠋ MyProject - grok` (animating braille) |
 | Waiting for your input | `[!] Action Required` ↔ `[.] Action Required` |
 
 **Note:** This changes Grok’s default tab-title behavior. Instead of the built-in
-verbose status messages on the tab, you get `{project} - Grok` (with a spinner
+verbose status messages on the tab, you get `{project} - grok` (with a spinner
 while the agent is working, and **Action Required** when input is needed). That
 is intentional: the install steps disable Grok’s own title updates so they do
-not fight this plugin.
+not fight this plugin. The suffix is lowercase `grok` so [Herdr](https://herdr.dev)
+can still classify the pane as idle when the agent is not working.
 
 ## Requirements
 
@@ -71,18 +72,63 @@ If titles never change after a plugin-only install, use `./scripts/install.sh`
 ## How it works
 
 ```text
-SessionStart      →  idle "{project} - Grok" (+ short re-assert vs default "grok")
-UserPromptSubmit  →  start braille spinner on "{project} - Grok" (~100ms)
+SessionStart      →  idle "{project} - grok" (+ short re-assert vs default "grok")
+UserPromptSubmit  →  start braille spinner on "{project} - grok" (~100ms)
 PreToolUse        →  keep spinner; ask_user_question → Action Required
 Notification      →  permission / elicitation → Action Required;
                       idle_prompt / agent_completed → clear spinner
 PostToolUse       →  clear alert, resume braille
-Stop / SessionEnd →  restore "{project} - Grok"
+Stop / SessionEnd →  restore "{project} - grok"
 (spinner also tails ~/.grok/sessions/…/events.jsonl for turn_ended —
  covers Ctrl-C cancel when Stop hooks skip)
 ```
 
 Hooks are **passive** (always allow tools). Details: [SECURITY.md](SECURITY.md).
+
+## Herdr
+
+[Herdr](https://herdr.dev) is an agent multiplexer with a sidebar. Two interactions
+matter for this plugin:
+
+### 1. OSC title vs Herdr “working” state
+
+Herdr’s Grok screen/OSC rules treat:
+
+- idle — title matching `(?:^| - )grok$` (**lowercase** `grok`)
+- working — any other non-empty OSC title (`\S`)
+
+So a title like `MyProject - Grok` (capital G) never matches idle and the
+sidebar braille/**working** state **never clears**. This plugin always uses
+lowercase ` - grok` for that reason.
+
+### 2. Animated titles thrash the sidebar
+
+Inside a Herdr pane, **every OSC title change can re-render the sidebar**, so
+when Herdr is detected (`HERDR_PANE_ID` / `HERDR_SOCKET_PATH` / `HERDR_ENV`):
+
+- Busy uses a **static** title (`⠋ {project} - grok`), not animated braille
+- Action Required is static (`[!] …`), not blinking
+- Idle restore still runs on Stop / `turn_ended` (Ctrl-C)
+- The same string is reported as pane metadata (`title` + `$summary`)
+
+Outside Herdr (plain Ghostty/iTerm tabs), braille animation still runs.
+
+### Show the title in the Herdr sidebar
+
+Herdr’s **default** agent rows do **not** show the terminal title. Optional
+`~/.config/herdr/config.toml`:
+
+```toml
+[ui.sidebar.agents.rows_by_agent]
+grok = [
+  ["state_icon", "terminal_title_stripped"],
+  ["workspace", "tab"],
+]
+# Or the metadata token this plugin sets:
+# grok = [["state_icon", "$summary"], ["workspace", "tab"]]
+```
+
+Then: `herdr server reload-config`.
 
 ## Install paths
 

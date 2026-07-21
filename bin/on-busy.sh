@@ -17,6 +17,12 @@ if spinner_is_healthy; then
 fi
 
 ensure_spinner_loop 2>/dev/null || true
-set_title_osc "⠋ $(spin_label)" 2>/dev/null || true
-hook_log "on-busy done pid=$(cat "$(pid_file)" 2>/dev/null || echo none)"
+# Under Herdr: static busy title (sidebar re-renders on every OSC change).
+# Outside Herdr: first braille frame; the spinner loop animates the rest.
+if in_herdr; then
+  set_display_title "⠋ $(spin_label)" 2>/dev/null || true
+else
+  set_title_osc "⠋ $(spin_label)" 2>/dev/null || true
+fi
+hook_log "on-busy done pid=$(cat "$(pid_file)" 2>/dev/null || echo none) herdr=$(in_herdr && echo 1 || echo 0)"
 exit 0
